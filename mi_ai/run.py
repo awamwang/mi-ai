@@ -61,9 +61,40 @@ def build_config(device: str):
     )
 
 
+async def _ensure_xiaomiio_if_needed(config) -> None:
+    """use_command 依赖 MiIO，启动前确保 xiaomiio token 存在。"""
+    if not config.use_command:
+        return
+    import json
+    from pathlib import Path
+
+    from aiohttp import ClientSession
+    from miservice import MiAccount
+
+    token_path = os.getenv("XIAOGPT_MI_TOKEN_PATH") or str(Path.home() / ".mi.token")
+    token_file = Path(token_path)
+    if token_file.is_file():
+        data = json.loads(token_file.read_text(encoding="utf-8"))
+        if "xiaomiio" in data:
+            return
+
+    if not (config.account and config.password):
+        print("警告：需要 xiaomiio 登录但缺少账号密码，L05C 播报可能失败。")
+        return
+
+    async with ClientSession() as session:
+        account = MiAccount(session, config.account, config.password, token_path)
+        ok = await account.login("xiaomiio")
+        if ok:
+            print("已补齐 xiaomiio 登录。")
+        else:
+            print("警告：xiaomiio 登录失败，请先运行 python -m mi_ai.login_mina")
+
+
 async def _run_forever(config) -> None:
     from xiaogpt.xiaogpt import MiGPT
 
+    await _ensure_xiaomiio_if_needed(config)
     miboy = MiGPT(config)
     try:
         await miboy.run_forever()
@@ -71,7 +102,19 @@ async def _run_forever(config) -> None:
         await miboy.close()
 
 
+def _fix_stdio_encoding() -> None:
+    """避免 Windows 控制台 GBK 无法打印模型回复中的特殊字符。"""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
 def main(argv: list[str] | None = None) -> None:
+    _fix_stdio_encoding()
     # 必须在导入 xiaogpt.bot 之前精简 bot 入口
     patch_xiaogpt_bots()
 
