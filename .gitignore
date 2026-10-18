@@ -1,0 +1,28 @@
+# 环境与密钥
+.env
+.env.local
+*.token
+.mi.token
+
+# 安装日志
+pip-install.log
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

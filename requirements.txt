@@ -1,0 +1,12 @@
+# 完整 xiaogpt[locked] 会因 google/langchain 依赖回退极慢；
+# 本项目只用 OpenAI 兼容 API + 小米 TTS，按最小依赖安装。
+xiaogpt==3.23
+miservice_fork>=2.9.3
+openai>=1
+aiohttp
+rich
+httpx[socks]
+pyyaml>=6
+python-dotenv>=1.0.0
+requests
+lingua-language-detector>=2.0.2
