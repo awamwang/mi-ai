@@ -7,6 +7,10 @@
 # 安装日志 / 临时验证链接
 pip-install.log
 _auth_url.txt
+crash_*.log
+
+# 服务运行日志与 PID
+logs/
 
 # Python
 .venv/

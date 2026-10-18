@@ -153,6 +153,15 @@ def main(argv: list[str] | None = None) -> None:
         asyncio.run(_run_forever(config))
     except KeyboardInterrupt:
         print("\n已停止。")
+    except Exception:
+        import traceback
+        from pathlib import Path
+
+        log = Path(__file__).resolve().parent.parent / f"crash_{device}.log"
+        log.write_text(traceback.format_exc(), encoding="utf-8")
+        traceback.print_exc()
+        print(f"\n异常已写入：{log}", file=sys.stderr)
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

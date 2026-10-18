@@ -1,4 +1,4 @@
-# 安装本项目最小依赖，并精简 xiaogpt 仅保留 chatgptapi
+﻿# 安装本项目最小依赖，并精简 xiaogpt 仅保留 chatgptapi
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
