@@ -11,15 +11,19 @@ from pathlib import Path
 from aiohttp import ClientSession
 from dotenv import load_dotenv
 
+from mi_ai.auth import clear_auth_required, prepare_auth_env
+from mi_ai.paths import get_token_path
 from mi_ai.settings import ENV_PATH, load_settings, require_xiaomi_login
+from mi_ai.token_store import SafeMiTokenStore
 
 
 async def _login_and_list(user: str, password: str) -> int:
     from miservice import MiAccount, MiNAService
 
-    token_path = os.getenv("XIAOGPT_MI_TOKEN_PATH") or os.path.expanduser("~/.mi.token")
+    token_path = get_token_path()
+    store = SafeMiTokenStore(token_path)
     async with ClientSession() as session:
-        account = MiAccount(session, user, password, token_path)
+        account = MiAccount(session, user, password, store)
 
         # 先看登录响应，便于定位 70016 / 验证码
         if not account.token:
@@ -73,7 +77,7 @@ async def _login_and_list(user: str, password: str) -> int:
                 )
             return 1
 
-        # 正常完整登录以写入 token
+        # 正常完整登录以写入 token（含 passToken 种子）
         account.token = {"deviceId": account.token.get("deviceId", "A1B2C3D4E5F60718")}
         ok = await account.login("micoapi")
         if not ok:
@@ -87,7 +91,9 @@ async def _login_and_list(user: str, password: str) -> int:
         else:
             print("micoapi + xiaomiio 均已登录。")
 
+        clear_auth_required()
         print(f"登录成功，token 已写入：{token_path}")
+        print(f"passToken 种子已保存，供失败后静默恢复。")
         mina = MiNAService(account)
         devices = await mina.device_list()
         if not devices:
@@ -110,6 +116,7 @@ async def _login_and_list(user: str, password: str) -> int:
 
 def main() -> None:
     load_dotenv(ENV_PATH, override=True)
+    prepare_auth_env()
     settings = load_settings()
     require_xiaomi_login(settings)
     if not (settings.mi_user and settings.mi_pass):
@@ -118,6 +125,7 @@ def main() -> None:
     os.environ["MI_USER"] = settings.mi_user
     os.environ["MI_PASS"] = settings.mi_pass
     print(f"使用账号：{settings.mi_user[:3]}***（来自 .env）")
+    print(f"token 路径：{get_token_path()}")
     code = asyncio.run(_login_and_list(settings.mi_user, settings.mi_pass))
     raise SystemExit(code)
 

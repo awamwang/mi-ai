@@ -6,8 +6,11 @@ import asyncio
 import os
 import sys
 
+from mi_ai.auth import prepare_auth_env
 from mi_ai.ensure_deps import patch_xiaogpt_bots
+from mi_ai.paths import get_token_path
 from mi_ai.settings import load_settings, require_xiaomi_login
+from mi_ai.token_store import SafeMiTokenStore
 
 
 async def _list_via_miservice(user: str, password: str) -> None:
@@ -15,10 +18,9 @@ async def _list_via_miservice(user: str, password: str) -> None:
     from aiohttp import ClientSession
     from miservice import MiAccount, MiNAService
 
-    # miservice 会读写 token 文件
-    token_path = os.getenv("XIAOGPT_MI_TOKEN_PATH") or os.path.expanduser("~/.mi.token")
+    store = SafeMiTokenStore(get_token_path())
     async with ClientSession() as session:
-        account = MiAccount(session, user, password, token_path)
+        account = MiAccount(session, user, password, store)
         await account.login("micoapi")
         mina = MiNAService(account)
         devices = await mina.device_list()
@@ -47,6 +49,7 @@ async def _list_via_miservice(user: str, password: str) -> None:
 
 
 def main() -> None:
+    prepare_auth_env()
     patch_xiaogpt_bots()
     settings = load_settings()
     require_xiaomi_login(settings)

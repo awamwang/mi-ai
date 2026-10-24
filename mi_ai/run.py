@@ -7,7 +7,9 @@ import asyncio
 import os
 import sys
 
+from mi_ai.auth import ensure_auth, prepare_auth_env
 from mi_ai.ensure_deps import patch_xiaogpt_bots
+from mi_ai.paths import get_token_path
 from mi_ai.settings import (
     get_speaker,
     load_settings,
@@ -71,7 +73,9 @@ async def _ensure_xiaomiio_if_needed(config) -> None:
     from aiohttp import ClientSession
     from miservice import MiAccount
 
-    token_path = os.getenv("XIAOGPT_MI_TOKEN_PATH") or str(Path.home() / ".mi.token")
+    from mi_ai.token_store import SafeMiTokenStore
+
+    token_path = get_token_path()
     token_file = Path(token_path)
     if token_file.is_file():
         data = json.loads(token_file.read_text(encoding="utf-8"))
@@ -82,8 +86,9 @@ async def _ensure_xiaomiio_if_needed(config) -> None:
         print("警告：需要 xiaomiio 登录但缺少账号密码，L05C 播报可能失败。")
         return
 
+    store = SafeMiTokenStore(token_path)
     async with ClientSession() as session:
-        account = MiAccount(session, config.account, config.password, token_path)
+        account = MiAccount(session, config.account, config.password, store)
         ok = await account.login("xiaomiio")
         if ok:
             print("已补齐 xiaomiio 登录。")
@@ -94,6 +99,14 @@ async def _ensure_xiaomiio_if_needed(config) -> None:
 async def _run_forever(config) -> None:
     from xiaogpt.xiaogpt import MiGPT
 
+    status = await ensure_auth()
+    if not status.ok:
+        print(f"鉴权失败：{status.message}", file=sys.stderr)
+        if status.notification_url:
+            print(f"请打开验证链接：{status.notification_url}", file=sys.stderr)
+        raise SystemExit(2)
+
+    print(f"鉴权正常 | token={get_token_path()}")
     await _ensure_xiaomiio_if_needed(config)
     miboy = MiGPT(config)
     try:
@@ -115,6 +128,7 @@ def _fix_stdio_encoding() -> None:
 
 def main(argv: list[str] | None = None) -> None:
     _fix_stdio_encoding()
+    prepare_auth_env()
     # 必须在导入 xiaogpt.bot 之前精简 bot 入口
     patch_xiaogpt_bots()
 

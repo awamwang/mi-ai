@@ -44,3 +44,16 @@ foreach ($device in $cfg.Devices) {
 
 $wlog = Get-MiAiDailyLogPath -LogDir $cfg.LogDir -Prefix "watchdog"
 Write-Host ("watchdog 今日日志：{0}" -f $wlog)
+
+$authReq = Join-Path $cfg.LogDir "AUTH_REQUIRED.txt"
+$tokenPath = Join-Path $MiAiRoot "data\mi.token"
+$seedPath = Join-Path $MiAiRoot "data\mi_pass_seed.json"
+Write-Host ("token 文件：{0}（{1}）" -f $tokenPath, $(if (Test-Path $tokenPath) { "存在" } else { "缺失" }))
+Write-Host ("passToken 种子：{0}（{1}）" -f $seedPath, $(if (Test-Path $seedPath) { "存在" } else { "缺失" }))
+if (Test-Path -LiteralPath $authReq) {
+    Write-Host "鉴权告警：需要人工验证 → logs\AUTH_REQUIRED.txt"
+    Get-Content -LiteralPath $authReq -TotalCount 8 -ErrorAction SilentlyContinue
+}
+else {
+    Write-Host "鉴权告警：无"
+}

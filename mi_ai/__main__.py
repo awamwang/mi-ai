@@ -12,6 +12,8 @@ def main() -> None:
             "  python -m mi_ai list          # 列出音箱 DID\n"
             "  python -m mi_ai run LX06      # 启动小爱音箱 Pro\n"
             "  python -m mi_ai run L05C      # 启动 Play 增强版\n"
+            "  python -m mi_ai auth          # 静默续期 / 鉴权探活\n"
+            "  python -m mi_ai.login_mina    # 交互登录（含短信验证）\n"
         )
         raise SystemExit(1)
 
@@ -29,6 +31,10 @@ def main() -> None:
             print("请指定音箱：python -m mi_ai run LX06 或 L05C")
             raise SystemExit(1)
         run_main(rest)
+    elif cmd in {"auth", "auth-check", "auth_check"}:
+        from mi_ai.auth import main as auth_main
+
+        auth_main(rest)
     else:
         print(f"未知命令：{cmd}")
         raise SystemExit(1)

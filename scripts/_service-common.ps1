@@ -56,6 +56,7 @@ function Get-MiAiServiceConfig {
     $baseSec = 5
     $maxSec = 300
     $keepDays = 7
+    $authCheckMin = 30
     $logDirName = "logs"
 
     $parsed = 0
@@ -68,6 +69,9 @@ function Get-MiAiServiceConfig {
     if ([int]::TryParse((Get-MiAiDotEnvValue -Key "MI_AI_LOG_KEEP_DAYS" -Default "7"), [ref]$parsed)) {
         $keepDays = [Math]::Max(1, $parsed)
     }
+    if ([int]::TryParse((Get-MiAiDotEnvValue -Key "MI_AI_AUTH_CHECK_MINUTES" -Default "30"), [ref]$parsed)) {
+        $authCheckMin = [Math]::Max(5, $parsed)
+    }
     $logDirRaw = Get-MiAiDotEnvValue -Key "MI_AI_LOG_DIR" -Default "logs"
     if ($logDirRaw.Trim() -ne "") {
         $logDirName = $logDirRaw.Trim().TrimEnd("\", "/")
@@ -79,14 +83,15 @@ function Get-MiAiServiceConfig {
     }
 
     return [pscustomobject]@{
-        Devices         = $devices
-        RestartBaseSec  = $baseSec
-        RestartMaxSec   = $maxSec
-        LogKeepDays     = $keepDays
-        LogDir          = $logDir
-        PythonExe       = Join-Path $MiAiRoot ".venv\Scripts\python.exe"
-        WatchdogScript  = Join-Path $PSScriptRoot "watchdog.ps1"
-        RunDeviceScript = Join-Path $PSScriptRoot "run-device.ps1"
+        Devices           = $devices
+        RestartBaseSec    = $baseSec
+        RestartMaxSec     = $maxSec
+        LogKeepDays       = $keepDays
+        AuthCheckMinutes  = $authCheckMin
+        LogDir            = $logDir
+        PythonExe         = Join-Path $MiAiRoot ".venv\Scripts\python.exe"
+        WatchdogScript    = Join-Path $PSScriptRoot "watchdog.ps1"
+        RunDeviceScript   = Join-Path $PSScriptRoot "run-device.ps1"
     }
 }
 
