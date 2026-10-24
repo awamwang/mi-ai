@@ -19,6 +19,8 @@ class RouteDecision:
     query: str
     matched_alias: str | None
     explicit: bool
+    # 仅切换会话（特征词单独出现），不向 Agent 提问
+    session_switch_only: bool = False
 
 
 _PREFIX_RE = re.compile(
@@ -36,8 +38,32 @@ def _strip_noise(text: str) -> str:
 def _known_chat_names(agent: AgentDef) -> list[str]:
     names = set(agent.chats.keys())
     names.update(list_chats(agent.id).keys())
+    names.update(agent.entry_phrases.values())
     # 长名优先，避免短名误伤
     return sorted(names, key=len, reverse=True)
+
+
+def _find_entry_phrase(
+    text: str, agent: AgentDef
+) -> tuple[str | None, str | None, int, int]:
+    """在文本中找最长特征入口词。返回 (phrase, chat_name, start, end)。"""
+    best: tuple[str, str, int, int] | None = None
+    for phrase, chat_name in agent.entry_phrases.items():
+        if not phrase:
+            continue
+        pos = text.find(phrase)
+        if pos < 0:
+            pos = text.lower().find(phrase.lower())
+        if pos < 0:
+            continue
+        end = pos + len(phrase)
+        if best is None or len(phrase) > len(best[0]) or (
+            len(phrase) == len(best[0]) and pos < best[2]
+        ):
+            best = (phrase, chat_name, pos, end)
+    if best is None:
+        return None, None, -1, -1
+    return best
 
 
 def _find_alias(text: str, agent: AgentDef) -> tuple[str | None, int, int]:
@@ -129,6 +155,47 @@ def _resolve_resume_id(agent: AgentDef, chat_name: str | None) -> str | None:
     return get_chat_id(agent.id, chat_name)
 
 
+def _route_with_entry_phrase(
+    text: str,
+    agent: AgentDef,
+    phrase: str,
+    chat_name: str,
+    start: int,
+    end: int,
+) -> RouteDecision:
+    """特征词路由：剥掉特征词，其余作为真正问题。"""
+    before = text[:start].strip()
+    after = text[end:].strip()
+    # 去掉「用/让」等粘连前缀
+    before = _PREFIX_RE.sub("", before).strip(" ，,：:")
+    rest = _strip_exec_prefix(f"{before} {after}".strip())
+    # 再清一次残留特征词
+    if rest.startswith(phrase):
+        rest = rest[len(phrase) :].lstrip(" ，,：:")
+    rest = _strip_exec_prefix(rest)
+
+    resume_id = _resolve_resume_id(agent, chat_name)
+    if not rest:
+        return RouteDecision(
+            agent=agent,
+            chat_name=chat_name,
+            resume_agent_id=resume_id,
+            query="",
+            matched_alias=phrase,
+            explicit=True,
+            session_switch_only=True,
+        )
+    return RouteDecision(
+        agent=agent,
+        chat_name=chat_name,
+        resume_agent_id=resume_id,
+        query=rest,
+        matched_alias=phrase,
+        explicit=True,
+        session_switch_only=False,
+    )
+
+
 def route_query(query: str, registry: AgentRegistry) -> RouteDecision:
     """根据口令选择 Agent；未点名则走 default。"""
     text = _strip_noise(query)
@@ -143,7 +210,27 @@ def route_query(query: str, registry: AgentRegistry) -> RouteDecision:
             explicit=False,
         )
 
-    # 先尝试每个启用 Agent 的别名（最长优先由 resolve_alias 完成）
+    # 1) 优先匹配各 Agent 的特征入口词（最长优先）
+    best_entry: tuple[AgentDef, str, str, int, int] | None = None
+    for agent in registry.agents.values():
+        if not agent.enabled and not agent.entry_phrases:
+            continue
+        phrase, chat_name, start, end = _find_entry_phrase(text, agent)
+        if phrase is None or chat_name is None:
+            continue
+        if best_entry is None or len(phrase) > len(best_entry[1]) or (
+            len(phrase) == len(best_entry[1]) and start < best_entry[3]
+        ):
+            best_entry = (agent, phrase, chat_name, start, end)
+
+    if best_entry is not None:
+        agent, phrase, chat_name, start, end = best_entry
+        if not agent.enabled:
+            # 禁用 Agent 的特征词仍识别，交由 RoutingBot 提示已关闭
+            return _route_with_entry_phrase(text, agent, phrase, chat_name, start, end)
+        return _route_with_entry_phrase(text, agent, phrase, chat_name, start, end)
+
+    # 2) 普通别名路由
     matched_agent = registry.resolve_alias(text)
     if matched_agent is None:
         agent = registry.agents[registry.default_id]
@@ -157,23 +244,18 @@ def route_query(query: str, registry: AgentRegistry) -> RouteDecision:
         )
 
     alias, start, end = _find_alias(text, matched_agent)
-    # 若别名不在句首附近，仍视为显式路由，但尽量剥掉别名段
     chat_names = _known_chat_names(matched_agent)
     chat_name, rest_start = _extract_chat_after_alias(text, end, chat_names)
     rest = _strip_exec_prefix(text[rest_start:])
 
-    # 去掉别名前缀废话：「帮我用」
     prefix = text[:start]
     if prefix and not rest:
-        # 例如整句只有「用 cursor」
         rest = ""
     elif not rest and start > 0:
-        # 别名在中间：取别名后内容；若空则取别名前内容
         rest = _strip_exec_prefix(text[end:]) or _strip_noise(
             _PREFIX_RE.sub("", text[:start])
         )
 
-    # 清理 rest 里残留的别名
     if alias and rest.lower().startswith(alias.lower()):
         rest = rest[len(alias) :].lstrip()
     rest = _strip_exec_prefix(rest)
@@ -186,4 +268,5 @@ def route_query(query: str, registry: AgentRegistry) -> RouteDecision:
         query=rest or text,
         matched_alias=alias,
         explicit=True,
+        session_switch_only=False,
     )

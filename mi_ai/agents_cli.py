@@ -33,6 +33,8 @@ def _cmd_list(_: argparse.Namespace) -> None:
             )
             if agent.cwd:
                 print(f"       cwd={agent.cwd}")
+            if agent.entry_phrases:
+                print(f"       entry_phrases={agent.entry_phrases}")
             yaml_chats = agent.chats
             bound = list_chats(agent.id)
             last = get_last_agent_id(agent.id)
@@ -58,6 +60,7 @@ def _cmd_route(args: argparse.Namespace) -> None:
                 "resume_agent_id": decision.resume_agent_id,
                 "matched_alias": decision.matched_alias,
                 "explicit": decision.explicit,
+                "session_switch_only": decision.session_switch_only,
                 "query": decision.query,
             },
             ensure_ascii=False,

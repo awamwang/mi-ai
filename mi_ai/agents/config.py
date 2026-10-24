@@ -35,6 +35,8 @@ class AgentDef:
     optimize_for: str | None = None
     resume_policy: str = "last"  # new | last
     chats: dict[str, str] = field(default_factory=dict)
+    # 特征入口词 → 聊天名；词本身不送进模型，只负责切到该会话
+    entry_phrases: dict[str, str] = field(default_factory=dict)
     repos: tuple[CloudRepoConfig, ...] = ()
     auto_create_pr: bool = False
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
@@ -111,6 +113,14 @@ def _parse_agent(agent_id: str, raw: dict[str, Any]) -> AgentDef:
                 continue
             chats[key] = str(aid).strip()
 
+    entry_phrases = _parse_entry_phrases(raw.get("entry_phrases"))
+    # 特征词自动并入 aliases，便于口令匹配
+    extra_aliases = tuple(
+        p for p in entry_phrases if p and p not in aliases
+    )
+    if extra_aliases:
+        aliases = (*aliases, *extra_aliases)
+
     repos: list[CloudRepoConfig] = []
     for item in raw.get("repos") or []:
         if not isinstance(item, dict):
@@ -137,10 +147,54 @@ def _parse_agent(agent_id: str, raw: dict[str, Any]) -> AgentDef:
         optimize_for=optimize_for,
         resume_policy=str(raw.get("resume_policy") or "last").strip().lower() or "last",
         chats=chats,
+        entry_phrases=entry_phrases,
         repos=tuple(repos),
         auto_create_pr=_as_bool(raw.get("auto_create_pr"), False),
         raw=dict(raw),
     )
+
+
+def _parse_entry_phrases(raw: Any) -> dict[str, str]:
+    """解析特征入口词。
+
+    支持：
+    - 列表：``[小爱编程]`` → 聊天名同名
+    - 映射：``{小爱编程: 绘画}`` 或 ``{小爱编程: agent-xxx}``
+      若值以 agent-/bc- 开头，聊天名仍用特征词，agent_id 应写在 chats 里更清晰；
+      这里值一律当作聊天名。
+    """
+    result: dict[str, str] = {}
+    if raw is None:
+        return result
+    if isinstance(raw, str):
+        for part in raw.split(","):
+            phrase = part.strip()
+            if phrase:
+                result[phrase] = phrase
+        return result
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, str) and item.strip():
+                phrase = item.strip()
+                result[phrase] = phrase
+            elif isinstance(item, dict):
+                for k, v in item.items():
+                    phrase = str(k).strip()
+                    if not phrase:
+                        continue
+                    chat = str(v).strip() if v is not None else phrase
+                    result[phrase] = chat or phrase
+        return result
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            phrase = str(k).strip()
+            if not phrase:
+                continue
+            if v is None or str(v).strip() in {"", "null", "None"}:
+                result[phrase] = phrase
+            else:
+                result[phrase] = str(v).strip()
+    return result
 
 
 def _parse_model(raw: dict[str, Any]) -> tuple[str, str | None]:

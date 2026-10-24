@@ -2,7 +2,8 @@
 # 口令示例（音箱 ASR 对英文 cursor 常听不准，优先用中文别名）：
 #   「帮我今天天气怎么样」                → default（chat）
 #   「帮我让编程助手说一声你好」          → cursor-local
-#   「帮我用编程助手在登录里执行改密码」  → cursor-local + 聊天「登录」
+#   「帮我小爱编程」                      → 只切换到「小爱编程」会话（不问模型）
+#   「帮我小爱编程画一只猫」              → cursor + 会话「小爱编程」+ 问题「画一只猫」
 #   「帮我用云端编程执行开 PR」            → cursor-cloud（需 enabled: true）
 
 default: chat
@@ -43,11 +44,15 @@ agents:
     optimize_for:
     # 未点名聊天时：new=每次新建；last=续上一次本 Agent 会话
     resume_policy: last
+    # 特征入口词 → 聊天名（词本身不送进模型，只负责切会话）
+    entry_phrases:
+      小爱编程: 小爱编程
+      # 绘画: 小爱编程
     # 命名聊天 → Cursor agent_id（local 以 agent- 开头）
-    # 也可运行：python -m mi_ai agents bind cursor 登录 <agent_id>
+    # 也可：python -m mi_ai agents bind cursor 小爱编程 <agent_id>
     chats:
+      # 小爱编程: agent-xxxxxxxx
       # 登录: agent-xxxxxxxx
-      # 音箱: agent-yyyyyyyy
 
   cursor-cloud:
     type: cursor-cloud

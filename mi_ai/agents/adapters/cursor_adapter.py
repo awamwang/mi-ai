@@ -107,6 +107,13 @@ class CursorAdapter(AgentAdapter):
                 "未安装 cursor-sdk，请执行：pip install cursor-sdk"
             ) from exc
 
+        if decision.session_switch_only:
+            name = decision.chat_name or "该"
+            # 特征词单独出现：只切会话，不向 Cursor 提问
+            if decision.resume_agent_id:
+                return f"好，已切换到「{name}」。"
+            return f"好，已准备「{name}」会话，下次直接说任务即可。"
+
         api_key = self._api_key()
         model = self._model_selection()
         resume_id = self._pick_resume_id(decision)

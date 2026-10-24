@@ -39,11 +39,14 @@ agents:
     # optimize_for: balanced  # 仅 auto-smart：cost | balanced | intelligence
     # 未点名聊天时：new=每次新建；last=续上一次本 Agent 会话
     resume_policy: last
+    # 特征入口词 → 聊天名（单独说只切换会话；后面跟任务则进该会话执行）
+    entry_phrases:
+      小爱编程: 小爱编程
     # 命名聊天 → Cursor agent_id（local 以 agent- 开头）
-    # 也可运行：python -m mi_ai agents bind cursor 登录 <agent_id>
+    # 也可：python -m mi_ai agents bind cursor 小爱编程 <agent_id>
     chats:
+      # 小爱编程: agent-xxxxxxxx
       # 登录: agent-xxxxxxxx
-      # 音箱: agent-yyyyyyyy
 
   cursor-cloud:
     type: cursor-cloud
