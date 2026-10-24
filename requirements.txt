@@ -10,3 +10,4 @@ pyyaml>=6
 python-dotenv>=1.0.0
 requests
 lingua-language-detector>=2.0.2
+cursor-sdk>=1.0.40

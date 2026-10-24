@@ -14,6 +14,58 @@ _LOGGER = logging.getLogger(__package__)
 _PATCHED = False
 
 
+def _cookie_from_response(resp, name: str = "serviceToken") -> str | None:
+    """从 aiohttp 响应或 Set-Cookie 头提取 cookie（跨域 STS 时 jar 可能为空）。"""
+    morsel = resp.cookies.get(name)
+    if morsel and morsel.value:
+        return morsel.value
+    # SimpleCookie / 多值头
+    raw_headers = resp.headers.getall("Set-Cookie", [])
+    for header in raw_headers:
+        # serviceToken=xxx; Path=/; ...
+        parts = header.split(";")[0].split("=", 1)
+        if len(parts) == 2 and parts[0].strip() == name and parts[1].strip():
+            return parts[1].strip()
+    for hist in getattr(resp, "history", ()) or ():
+        found = _cookie_from_response(hist, name)
+        if found:
+            return found
+    return None
+
+
+async def _fetch_service_token(
+    session,
+    location: str,
+    nonce,
+    ssecurity: str,
+    cookies: dict[str, str] | None = None,
+) -> str:
+    """拉取 serviceToken；缺 cookie 时给出可诊断错误（不再裸 KeyError）。"""
+    import base64
+    from urllib import parse as url_parse
+
+    nsec = "nonce=" + str(nonce) + "&" + ssecurity
+    client_sign = base64.b64encode(hashlib.sha1(nsec.encode()).digest()).decode()
+    url = location + "&clientSign=" + url_parse.quote(client_sign)
+    async with session.get(
+        url, allow_redirects=True, ssl=False, cookies=cookies or {}
+    ) as r:
+        token = _cookie_from_response(r)
+        if token:
+            return token
+        body = (await r.text())[:400]
+        raise Exception(
+            {
+                "desc": "未拿到 serviceToken cookie（可能需短信验证或 location 已失效）",
+                "status": r.status,
+                "url": str(r.url)[:200],
+                "cookies": list(r.cookies.keys()),
+                "set_cookie": r.headers.getall("Set-Cookie", [])[:3],
+                "body": body,
+            }
+        )
+
+
 def apply_auth_patches() -> None:
     """幂等：替换 MiTokenStore，并加固 MiAccount.login / mi_request。"""
     global _PATCHED
@@ -35,8 +87,16 @@ def apply_auth_patches() -> None:
         _orig_init(self, session, username, password, token_store)
 
     async def _patched_login(self, sid):
-        """相对上游：保留已有 passToken；响应缺字段时不 KeyError。"""
+        """相对上游：保留已有 passToken；响应缺字段时不 KeyError。
+
+        某一 sid（如 xiaomiio）失败时，不得清掉其他已成功的 sid（如 micoapi）。
+        """
         durable_before = extract_durable(self.token)
+        other_sids_before = {
+            k: v
+            for k, v in (self.token or {}).items()
+            if k not in ("deviceId", "userId", "passToken") and k != sid
+        }
         if not self.token:
             self.token = {"deviceId": get_random(16).upper()}
         elif "deviceId" not in self.token:
@@ -45,6 +105,10 @@ def apply_auth_patches() -> None:
         try:
             resp = await self._serviceLogin(f"serviceLogin?sid={sid}&_json=true")
             if resp.get("code") != 0:
+                # passToken 续期失败（常见 70016）时，必须先拿掉失效 passToken，
+                # 否则 Auth2 仍带着旧票，STS 会 401 且没有 serviceToken cookie。
+                self.token.pop("passToken", None)
+                resp = await self._serviceLogin(f"serviceLogin?sid={sid}&_json=true")
                 data = {
                     "_json": "true",
                     "qs": resp["qs"],
@@ -88,8 +152,16 @@ def apply_auth_patches() -> None:
             if nonce is None or not ssecurity:
                 raise Exception(resp)
 
-            service_token = await self._securityTokenService(
-                location, nonce, ssecurity
+            service_token = await _fetch_service_token(
+                self.session,
+                location,
+                nonce,
+                ssecurity,
+                cookies={
+                    "userId": str(self.token.get("userId") or ""),
+                    "deviceId": str(self.token.get("deviceId") or ""),
+                    "passToken": str(self.token.get("passToken") or ""),
+                },
             )
             self.token[sid] = (ssecurity, service_token)
             if self.token_store:
@@ -104,11 +176,20 @@ def apply_auth_patches() -> None:
             else:
                 _LOGGER.exception("Exception on login %s: %s", self.username, e)
             durable = extract_durable(self.token) or durable_before
+            # 保留其它已登录 sid，只丢掉当前失败的 sid
+            other_sids = {
+                k: v
+                for k, v in (self.token or {}).items()
+                if k not in ("deviceId", "userId", "passToken") and k != sid
+            } or other_sids_before
             if durable.get("passToken"):
-                self.token = dict(durable)
+                self.token = {**durable, **other_sids}
                 if self.token_store:
                     self.token_store.save_token(self.token)
-                _LOGGER.warning("login(%s) 失败，已保留 passToken", sid)
+                kept = ",".join(sorted(other_sids)) or "-"
+                _LOGGER.warning(
+                    "login(%s) 失败，已保留 passToken 与其它 sid：%s", sid, kept
+                )
             else:
                 self.token = None
                 if self.token_store:

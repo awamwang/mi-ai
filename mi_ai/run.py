@@ -18,6 +18,29 @@ from mi_ai.settings import (
 )
 
 
+def install_routing_bot() -> None:
+    """用 RoutingBot 包装 chatgptapi，启用多 Agent 口令路由。"""
+    from xiaogpt.bot.chatgptapi_bot import ChatGPTBot
+
+    import xiaogpt.bot as bot_mod
+
+    from mi_ai.agents.config import load_agent_registry
+    from mi_ai.agents.routing_bot import RoutingBot
+
+    registry = load_agent_registry()
+
+    def get_bot(config):
+        inner = ChatGPTBot.from_config(config)
+        return RoutingBot(inner, registry=registry, prompt=config.prompt or "")
+
+    bot_mod.get_bot = get_bot
+    enabled = ", ".join(
+        f"{a.id}{'*' if a.id == registry.default_id else ''}"
+        for a in registry.enabled_agents()
+    )
+    print(f"Agent 路由：{registry.source_path.name} | 启用：{enabled}")
+
+
 def build_config(device: str):
     """根据 .env 与音箱配置构建 xiaogpt Config。"""
     from xiaogpt.config import Config
@@ -131,6 +154,7 @@ def main(argv: list[str] | None = None) -> None:
     prepare_auth_env()
     # 必须在导入 xiaogpt.bot 之前精简 bot 入口
     patch_xiaogpt_bots()
+    install_routing_bot()
 
     parser = argparse.ArgumentParser(
         description="启动小米音箱 ↔ 云端大模型桥接（xiaogpt）",
@@ -161,6 +185,8 @@ def main(argv: list[str] | None = None) -> None:
     )
     print(f"触发词：{', '.join(config.keyword)}")
     print("对音箱说：小爱同学，帮我…… / 请问……")
+    print("交给 Cursor：帮我让编程助手…… / 帮我用写代码执行……")
+    print("指定聊天：帮我用编程助手在登录里执行……")
     print("按 Ctrl+C 结束\n")
 
     try:

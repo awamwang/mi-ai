@@ -13,6 +13,8 @@ def main() -> None:
             "  python -m mi_ai run LX06      # 启动小爱音箱 Pro\n"
             "  python -m mi_ai run L05C      # 启动 Play 增强版\n"
             "  python -m mi_ai auth          # 静默续期 / 鉴权探活\n"
+            "  python -m mi_ai agents list   # 查看 Agent 注册表\n"
+            "  python -m mi_ai agents route \"用cursor在登录里执行…\"\n"
             "  python -m mi_ai.login_mina    # 交互登录（含短信验证）\n"
         )
         raise SystemExit(1)
@@ -35,6 +37,10 @@ def main() -> None:
         from mi_ai.auth import main as auth_main
 
         auth_main(rest)
+    elif cmd in {"agents", "agent"}:
+        from mi_ai.agents_cli import main as agents_main
+
+        agents_main(rest)
     else:
         print(f"未知命令：{cmd}")
         raise SystemExit(1)

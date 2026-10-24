@@ -1,0 +1,68 @@
+# 多 Agent 注册表（复制为 agents.yaml 后按需修改）
+# 口令示例（优先中文别名，英文 cursor 音箱常听不准）：
+#   「帮我今天天气怎么样」                → default（chat）
+#   「帮我让编程助手说一声你好」          → cursor-local
+#   「帮我用编程助手在登录里执行改密码」  → cursor-local + 聊天「登录」
+#   「帮我用云端编程助手执行开 PR」        → cursor-cloud（需 enabled: true）
+
+default: chat
+
+# 全局 Cursor API Key 也可写在 .env 的 CURSOR_API_KEY
+# cursor_api_key: ""
+
+agents:
+  chat:
+    type: chat
+    enabled: true
+    aliases:
+      - 问答
+      - 聊天
+      - 大模型
+
+  cursor:
+    type: cursor-local
+    enabled: true
+    aliases:
+      - 编程助手
+      - 写代码
+      - 代码助手
+      - 光标
+      - 小C
+      - 科瑟
+      - 克瑟
+      - cursor
+      - Cursor
+    # 本机仓库路径；留空则用当前项目根目录
+    cwd: ""
+    # 个人账号常用 default（服务端 Auto）；Teams Router 用 auto-smart + optimize_for
+    model: default
+    # optimize_for: balanced  # 仅 auto-smart：cost | balanced | intelligence
+    # 未点名聊天时：new=每次新建；last=续上一次本 Agent 会话
+    resume_policy: last
+    # 命名聊天 → Cursor agent_id（local 以 agent- 开头）
+    # 也可运行：python -m mi_ai agents bind cursor 登录 <agent_id>
+    chats:
+      # 登录: agent-xxxxxxxx
+      # 音箱: agent-yyyyyyyy
+
+  cursor-cloud:
+    type: cursor-cloud
+    enabled: false
+    aliases:
+      - 云端编程助手
+      - 云端编程
+      - 云端光标
+      - 云端cursor
+      - 云端 Cursor
+      - cursor云
+      - Cursor Cloud
+      - cloud cursor
+    model: default
+    resume_policy: last
+    # Cloud 仓库；空列表表示无仓库 Cloud Agent（账号需开通）
+    repos:
+      - url: https://github.com/your-org/your-repo
+        starting_ref: main
+    auto_create_pr: false
+    chats:
+      # 部署: bc-xxxxxxxx
