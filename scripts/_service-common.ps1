@@ -82,6 +82,16 @@ function Get-MiAiServiceConfig {
         $logDir = Join-Path $MiAiRoot $logDir
     }
 
+    # 本机控制台（默认随 watchdog 保活；18765 在部分 Windows 被排除，默认 18865）
+    $consoleEnabledRaw = (Get-MiAiDotEnvValue -Key "MI_AI_CONSOLE" -Default "1").Trim().ToLowerInvariant()
+    $consoleEnabled = $consoleEnabledRaw -in @("1", "true", "yes", "y", "on")
+    $consoleHost = (Get-MiAiDotEnvValue -Key "MI_AI_CONSOLE_HOST" -Default "127.0.0.1").Trim()
+    if ($consoleHost -eq "") { $consoleHost = "127.0.0.1" }
+    $consolePort = 18865
+    if ([int]::TryParse((Get-MiAiDotEnvValue -Key "MI_AI_CONSOLE_PORT" -Default "18865"), [ref]$parsed)) {
+        $consolePort = [Math]::Max(1, [Math]::Min(65535, $parsed))
+    }
+
     return [pscustomobject]@{
         Devices           = $devices
         RestartBaseSec    = $baseSec
@@ -92,6 +102,11 @@ function Get-MiAiServiceConfig {
         PythonExe         = Join-Path $MiAiRoot ".venv\Scripts\python.exe"
         WatchdogScript    = Join-Path $PSScriptRoot "watchdog.ps1"
         RunDeviceScript   = Join-Path $PSScriptRoot "run-device.ps1"
+        RunConsoleScript  = Join-Path $PSScriptRoot "run-console.ps1"
+        ConsoleEnabled    = $consoleEnabled
+        ConsoleHost       = $consoleHost
+        ConsolePort       = $consolePort
+        ConsoleUrl        = ("http://{0}:{1}/" -f $consoleHost, $consolePort)
     }
 }
 

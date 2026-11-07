@@ -9,6 +9,12 @@ Write-Host "=== mi-ai 服务状态 ==="
 Write-Host ("项目目录：{0}" -f $MiAiRoot)
 Write-Host ("日志目录：{0}" -f $cfg.LogDir)
 Write-Host ("保活设备：{0}" -f ($cfg.Devices -join ", "))
+if ($cfg.ConsoleEnabled) {
+    Write-Host ("控制台：{0}" -f $cfg.ConsoleUrl)
+}
+else {
+    Write-Host "控制台：已关闭（MI_AI_CONSOLE=0）"
+}
 Write-Host ("任务计划：{0}" -f $MiAiTaskName)
 
 $task = Get-ScheduledTask -TaskName $MiAiTaskName -ErrorAction SilentlyContinue
@@ -40,6 +46,20 @@ foreach ($device in $cfg.Devices) {
         Write-Host ("{0}：未运行" -f $device)
     }
     Write-Host ("  今日日志：{0}" -f $log)
+}
+
+if ($cfg.ConsoleEnabled) {
+    $cpf = Join-Path $cfg.LogDir "console.pid"
+    $cpid = Read-MiAiPidFile -Path $cpf
+    $cproc = Get-MiAiProcessByPid -ProcessId $cpid
+    $clog = Get-MiAiDailyLogPath -LogDir $cfg.LogDir -Prefix "console"
+    if ($cproc) {
+        Write-Host ("console：运行中 wrapperPid={0} → {1}" -f $cpid, $cfg.ConsoleUrl)
+    }
+    else {
+        Write-Host ("console：未运行（期望 {0}）" -f $cfg.ConsoleUrl)
+    }
+    Write-Host ("  今日日志：{0}" -f $clog)
 }
 
 $wlog = Get-MiAiDailyLogPath -LogDir $cfg.LogDir -Prefix "watchdog"

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>mi-ai 控制台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,560;9..144,700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="atmosphere" aria-hidden="true"></div>
+  <header class="top">
+    <div class="brand-block">
+      <p class="eyebrow">本机桥接</p>
+      <h1 class="brand">mi-ai</h1>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button type="button" class="tab is-active" data-tab="overview" role="tab" aria-selected="true">概览</button>
+      <button type="button" class="tab" data-tab="config" role="tab" aria-selected="false">配置</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="panel-overview" class="panel is-active" role="tabpanel">
+      <p class="lede">设备状态、提示词与运行摘要。默认仅本机可访问。</p>
+
+      <div class="status-strip" id="status-strip">
+        <div class="stat">
+          <span class="stat-label">watchdog</span>
+          <span class="stat-value" id="wd-state">—</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">登录</span>
+          <span class="stat-value" id="auth-state">—</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">模型</span>
+          <span class="stat-value" id="model-state">—</span>
+        </div>
+      </div>
+
+      <section class="login-panel" id="login-panel">
+        <h2 class="section-title">小米登录</h2>
+        <p class="device-meta" id="login-detail">—</p>
+        <div class="service-actions">
+          <button type="button" class="btn btn-primary" id="btn-open-login">打开小米登录页</button>
+          <button type="button" class="btn" id="btn-open-verify" hidden>打开验证链接</button>
+          <a class="btn" id="link-console-self" href="/" target="_blank" rel="noreferrer">控制台地址</a>
+        </div>
+      </section>
+
+      <div class="service-actions">
+        <button type="button" class="btn" id="btn-refresh">刷新</button>
+        <button type="button" class="btn btn-primary" id="btn-start">启动服务</button>
+        <button type="button" class="btn" id="btn-stop">停止服务</button>
+      </div>
+
+      <h2 class="section-title">设备</h2>
+      <div id="device-list" class="device-list"></div>
+
+      <h2 class="section-title">对话</h2>
+      <div class="dialog-block" id="dialog-block"></div>
+
+      <pre class="service-output" id="service-output" hidden></pre>
+    </section>
+
+    <section id="panel-config" class="panel" role="tabpanel" hidden>
+      <p class="lede">修改基础配置并写回 <code>.env</code>。Cookie 工具只写入 token，不写 MI_COOKIE。</p>
+
+      <h2 class="section-title">Cookie 工具</h2>
+      <div class="tool">
+        <label for="cookie-input">粘贴 account.xiaomi.com 整段 Cookie</label>
+        <textarea id="cookie-input" rows="5" placeholder="userId=...; passToken=...; ..."></textarea>
+        <label class="check">
+          <input type="checkbox" id="cookie-login" checked />
+          写入后立即执行 login_mina 换票
+        </label>
+        <button type="button" class="btn btn-primary" id="btn-cookie">提取并写入 token</button>
+        <p class="hint" id="cookie-hint"></p>
+      </div>
+
+      <h2 class="section-title">配置项</h2>
+      <form id="config-form" class="config-form"></form>
+      <div class="service-actions">
+        <button type="submit" form="config-form" class="btn btn-primary">保存到 .env</button>
+      </div>
+      <p class="hint" id="config-hint"></p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span id="clock"></span>
+    <span>127.0.0.1 · 端口见启动参数</span>
+  </footer>
+  <script src="/static/app.js"></script>
+</body>
+</html>

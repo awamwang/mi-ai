@@ -37,8 +37,11 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object {
         $_.CommandLine -and (
             ($_.CommandLine -like "*$rootHint*run-device.ps1*") -or
+            ($_.CommandLine -like "*$rootHint*run-console.ps1*") -or
             ($_.CommandLine -like "*$rootHint*watchdog.ps1*") -or
-            ($_.CommandLine -like "*$rootHint*.venv\Scripts\python.exe*-m mi_ai run*")
+            ($_.CommandLine -like "*$rootHint*.venv\Scripts\python.exe*-m mi_ai run*") -or
+            ($_.CommandLine -like "*$rootHint*.venv\Scripts\python.exe*-m mi_ai.console*") -or
+            ($_.CommandLine -like "*$rootHint*.venv\Scripts\python.exe*-m mi_ai console*")
         )
     } |
     ForEach-Object {

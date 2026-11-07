@@ -31,9 +31,9 @@ if (-not (Test-Path -LiteralPath $cfg.RunDeviceScript)) {
 
 Write-MiAiPidFile -Path $pidFile -ProcessId $PID
 Write-MiAiLog -LogPath $watchLog -Message (
-    "watchdog 启动 pid={0} devices={1} base={2}s max={3}s authCheck={4}m log={5}" -f `
+    "watchdog 启动 pid={0} devices={1} base={2}s max={3}s authCheck={4}m console={5} log={6}" -f `
         $PID, ($cfg.Devices -join ","), $cfg.RestartBaseSec, $cfg.RestartMaxSec, `
-        $cfg.AuthCheckMinutes, $cfg.LogDir
+        $cfg.AuthCheckMinutes, $(if ($cfg.ConsoleEnabled) { $cfg.ConsoleUrl } else { "off" }), $cfg.LogDir
 )
 
 # 每台设备的运行状态
@@ -49,7 +49,16 @@ foreach ($device in $cfg.Devices) {
     }
 }
 
+$consoleState = [pscustomobject]@{
+    Process    = $null
+    FailCount  = 0
+    StartedAt  = $null
+    NextStart  = Get-Date
+    PidFile    = Join-Path $cfg.LogDir "console.pid"
+}
+
 function Stop-AllChildren {
+    param([switch]$IncludeConsole)
     foreach ($device in @($states.Keys)) {
         $st = $states[$device]
         if ($st.Process -and -not $st.Process.HasExited) {
@@ -60,6 +69,61 @@ function Stop-AllChildren {
         }
         $st.Process = $null
     }
+    if ($IncludeConsole -and $consoleState.Process -and -not $consoleState.Process.HasExited) {
+        Stop-MiAiProcessTree -ProcessId $consoleState.Process.Id
+        $consoleState.Process = $null
+        if (Test-Path -LiteralPath $consoleState.PidFile) {
+            Remove-Item -LiteralPath $consoleState.PidFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Update-MiAiChildLifecycle {
+    param(
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$PidFile
+    )
+    if ($State.Process -and -not $State.Process.HasExited) {
+        return $false
+    }
+    if ($State.Process -and $State.Process.HasExited) {
+        $lived = 0
+        if ($State.StartedAt) {
+            try {
+                $lived = ($State.Process.ExitTime - $State.StartedAt).TotalSeconds
+            }
+            catch {
+                $lived = ((Get-Date) - $State.StartedAt).TotalSeconds
+            }
+            if ($lived -lt 0) {
+                $lived = ((Get-Date) - $State.StartedAt).TotalSeconds
+            }
+        }
+        $exitCode = -1
+        try { $exitCode = $State.Process.ExitCode } catch { $exitCode = -1 }
+        if ($lived -ge $MiAiStableSeconds) {
+            $State.FailCount = 0
+            $State.NextStart = Get-Date
+            Write-MiAiLog -LogPath $watchLog -Message (
+                "{0} 退出 code={1} 已稳定运行 {2:N0}s，重置退避" -f $Name, $exitCode, $lived
+            )
+        }
+        else {
+            $State.FailCount = $State.FailCount + 1
+            $delay = Get-MiAiBackoffSeconds -FailCount $State.FailCount -BaseSec $cfg.RestartBaseSec -MaxSec $cfg.RestartMaxSec
+            $State.NextStart = (Get-Date).AddSeconds($delay)
+            Write-MiAiLog -LogPath $watchLog -Message (
+                "{0} 异常退出 code={1} lived={2:N0}s fail#{3}，{4}s 后重启" -f `
+                    $Name, $exitCode, $lived, $State.FailCount, $delay
+            )
+        }
+        $State.Process = $null
+        if (Test-Path -LiteralPath $PidFile) {
+            Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+    return ((Get-Date) -ge $State.NextStart)
 }
 
 function Invoke-MiAiAuthCheck {
@@ -132,55 +196,8 @@ try {
 
         foreach ($device in $cfg.Devices) {
             $st = $states[$device]
-
-            if ($st.Process -and -not $st.Process.HasExited) {
-                continue
-            }
-
-            # 子进程刚退出：记账并计算退避
-            if ($st.Process -and $st.Process.HasExited) {
-                $lived = 0
-                if ($st.StartedAt) {
-                    try {
-                        $lived = ($st.Process.ExitTime - $st.StartedAt).TotalSeconds
-                    }
-                    catch {
-                        $lived = ((Get-Date) - $st.StartedAt).TotalSeconds
-                    }
-                    if ($lived -lt 0) {
-                        $lived = ((Get-Date) - $st.StartedAt).TotalSeconds
-                    }
-                }
-                $exitCode = -1
-                try {
-                    $exitCode = $st.Process.ExitCode
-                }
-                catch {
-                    $exitCode = -1
-                }
-                if ($lived -ge $MiAiStableSeconds) {
-                    $st.FailCount = 0
-                    $st.NextStart = Get-Date
-                    Write-MiAiLog -LogPath $watchLog -Message (
-                        "{0} 退出 code={1} 已稳定运行 {2:N0}s，重置退避" -f $device, $exitCode, $lived
-                    )
-                }
-                else {
-                    $st.FailCount = $st.FailCount + 1
-                    $delay = Get-MiAiBackoffSeconds -FailCount $st.FailCount -BaseSec $cfg.RestartBaseSec -MaxSec $cfg.RestartMaxSec
-                    $st.NextStart = (Get-Date).AddSeconds($delay)
-                    Write-MiAiLog -LogPath $watchLog -Message (
-                        "{0} 异常退出 code={1} lived={2:N0}s fail#{3}，{4}s 后重启" -f `
-                            $device, $exitCode, $lived, $st.FailCount, $delay
-                    )
-                }
-                $st.Process = $null
-                if (Test-Path -LiteralPath $st.DevicePidFile) {
-                    Remove-Item -LiteralPath $st.DevicePidFile -Force -ErrorAction SilentlyContinue
-                }
-            }
-
-            if ((Get-Date) -lt $st.NextStart) {
+            $ready = Update-MiAiChildLifecycle -State $st -Name $device -PidFile $st.DevicePidFile
+            if (-not $ready) {
                 continue
             }
 
@@ -216,12 +233,56 @@ try {
             }
         }
 
+        if ($cfg.ConsoleEnabled) {
+            $readyConsole = Update-MiAiChildLifecycle -State $consoleState -Name "console" -PidFile $consoleState.PidFile
+            if ($readyConsole) {
+                if (-not (Test-Path -LiteralPath $cfg.RunConsoleScript)) {
+                    Write-MiAiLog -LogPath $watchLog -Message ("缺少控制台脚本：{0}" -f $cfg.RunConsoleScript)
+                    $consoleState.NextStart = (Get-Date).AddSeconds(60)
+                }
+                else {
+                    $consoleLog = Get-MiAiDailyLogPath -LogDir $cfg.LogDir -Prefix "console"
+                    $argList = @(
+                        "-NoProfile"
+                        "-ExecutionPolicy", "Bypass"
+                        "-File", $cfg.RunConsoleScript
+                        "-LogPath", $consoleLog
+                        "-Root", $MiAiRoot
+                        "-HostAddress", $cfg.ConsoleHost
+                        "-Port", "$($cfg.ConsolePort)"
+                    )
+                    try {
+                        $proc = Start-Process -FilePath "powershell.exe" `
+                            -ArgumentList $argList `
+                            -WorkingDirectory $MiAiRoot `
+                            -WindowStyle Hidden `
+                            -PassThru
+                        $consoleState.Process = $proc
+                        $consoleState.StartedAt = Get-Date
+                        Write-MiAiPidFile -Path $consoleState.PidFile -ProcessId $proc.Id
+                        Write-MiAiLog -LogPath $watchLog -Message (
+                            "已启动 console wrapperPid={0} url={1} log={2}" -f `
+                                $proc.Id, $cfg.ConsoleUrl, $consoleLog
+                        )
+                    }
+                    catch {
+                        $consoleState.FailCount = $consoleState.FailCount + 1
+                        $delay = Get-MiAiBackoffSeconds -FailCount $consoleState.FailCount -BaseSec $cfg.RestartBaseSec -MaxSec $cfg.RestartMaxSec
+                        $consoleState.NextStart = (Get-Date).AddSeconds($delay)
+                        Write-MiAiLog -LogPath $watchLog -Message (
+                            "启动 console 失败：{0}；{1}s 后重试" -f $_.Exception.Message, $delay
+                        )
+                    }
+                }
+            }
+        }
+
         Start-Sleep -Seconds 2
     }
 }
 finally {
     Write-MiAiLog -LogPath $watchLog -Message "watchdog 正在退出，清理子进程"
-    Stop-AllChildren
+    Stop-AllChildren -IncludeConsole
     if (Test-Path -LiteralPath $pidFile) {
         $cur = Read-MiAiPidFile -Path $pidFile
         if ($cur -eq $PID) {
