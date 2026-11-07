@@ -26,7 +26,11 @@ if (-not (Test-Path -LiteralPath $py)) {
 $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 Add-Content -LiteralPath $LogPath -Value "$stamp ===== 启动 $Device =====" -Encoding UTF8
 
-& $py -m mi_ai run $Device *>> $LogPath
+# 避免 *>> 把日志写成 UTF-16，导致后续读写异常
+& $py -m mi_ai run $Device 2>&1 | ForEach-Object {
+    $line = "$_"
+    Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8
+}
 $code = $LASTEXITCODE
 if ($null -eq $code) {
     $code = 0

@@ -47,23 +47,33 @@ async def _fetch_service_token(
     nsec = "nonce=" + str(nonce) + "&" + ssecurity
     client_sign = base64.b64encode(hashlib.sha1(nsec.encode()).digest()).decode()
     url = location + "&clientSign=" + url_parse.quote(client_sign)
-    async with session.get(
-        url, allow_redirects=True, ssl=False, cookies=cookies or {}
-    ) as r:
-        token = _cookie_from_response(r)
-        if token:
-            return token
-        body = (await r.text())[:400]
-        raise Exception(
-            {
+    # 优先不跟随跳转：STS 常在首包 Set-Cookie 下发 serviceToken；
+    # 自动跳转偶发落到 401 且丢 cookie。
+    last_meta: dict | None = None
+    for allow_redirects in (False, True):
+        async with session.get(
+            url,
+            allow_redirects=allow_redirects,
+            ssl=False,
+            cookies=cookies or {},
+        ) as r:
+            token = _cookie_from_response(r)
+            if token:
+                return token
+            body = (await r.text())[:400]
+            last_meta = {
                 "desc": "未拿到 serviceToken cookie（可能需短信验证或 location 已失效）",
                 "status": r.status,
                 "url": str(r.url)[:200],
                 "cookies": list(r.cookies.keys()),
                 "set_cookie": r.headers.getall("Set-Cookie", [])[:3],
                 "body": body,
+                "allow_redirects": allow_redirects,
             }
-        )
+            # 单次 location 可能已消费，不再用同一 URL 重试跳转
+            if r.status in (401, 403):
+                break
+    raise Exception(last_meta or {"desc": "未拿到 serviceToken cookie"})
 
 
 def apply_auth_patches() -> None:
