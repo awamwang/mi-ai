@@ -150,6 +150,37 @@ def create_app() -> FastAPI:
     return app
 
 
+def _decode_subprocess_bytes(raw: bytes) -> str:
+    """解码子进程输出。
+
+    Windows 上 PowerShell 管道常为系统 ANSI（中文环境多为 GBK），
+    不能只用 UTF-8，否则控制台网页会显示乱码。
+    """
+    if not raw:
+        return ""
+    candidates: list[str] = []
+    for enc in ("utf-8-sig", "utf-8", "gbk"):
+        try:
+            candidates.append(raw.decode(enc))
+        except UnicodeDecodeError:
+            continue
+    if not candidates:
+        return raw.decode("utf-8", errors="replace")
+
+    markers = ("服务", "状态", "运行中", "控制台", "项目", "日志", "启动", "停止")
+    mojibake = ("鎺у埗", "锟斤拷", "Ã", "Â")
+
+    def score(text: str) -> int:
+        s = 0
+        if "\ufffd" in text:
+            s -= 100
+        s += 10 * sum(1 for w in markers if w in text)
+        s -= 30 * sum(1 for w in mojibake if w in text)
+        return s
+
+    return max(candidates, key=score)
+
+
 def _run_ps1(script: Path) -> tuple[str, int]:
     cmd = [
         "powershell.exe",
@@ -164,12 +195,9 @@ def _run_ps1(script: Path) -> tuple[str, int]:
             cmd,
             cwd=str(ROOT_DIR),
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=120,
         )
-        out = (proc.stdout or "") + (proc.stderr or "")
+        out = _decode_subprocess_bytes((proc.stdout or b"") + (proc.stderr or b""))
         return out.strip(), int(proc.returncode)
     except Exception as exc:  # noqa: BLE001
         _LOGGER.exception("执行脚本失败：%s", script)
@@ -190,12 +218,10 @@ async def _run_login_mina() -> dict[str, Any]:
             cmd,
             cwd=str(ROOT_DIR),
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=120,
         )
-        return ((proc.stdout or "") + (proc.stderr or "")).strip(), int(proc.returncode)
+        out = _decode_subprocess_bytes((proc.stdout or b"") + (proc.stderr or b""))
+        return out.strip(), int(proc.returncode)
 
     output, code = await asyncio.to_thread(_run)
     return {"ok": code == 0, "code": code, "output": output[-3000:]}

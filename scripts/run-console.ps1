@@ -11,6 +11,8 @@ Set-Location -LiteralPath $Root
 
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
+# 按 UTF-8 接收 Python 输出，避免日志出现「鎺у埗鍙」类乱码
+$OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
 
 $logDir = Split-Path -Parent $LogPath
 if (-not (Test-Path -LiteralPath $logDir)) {

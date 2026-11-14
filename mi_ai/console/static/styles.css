@@ -11,8 +11,8 @@
   --ok: #1f7a4c;
   --shadow: 0 18px 50px rgba(15, 40, 45, 0.08);
   --radius: 18px;
-  --font: "Manrope", "Segoe UI", sans-serif;
-  --display: "Fraunces", Georgia, serif;
+  --font: "Manrope", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --display: "Fraunces", "Segoe UI", "Microsoft YaHei UI", Georgia, serif;
 }
 
 * { box-sizing: border-box; }
@@ -141,7 +141,6 @@ main {
   font-size: 0.75rem;
   color: var(--muted);
   letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .stat-value {
