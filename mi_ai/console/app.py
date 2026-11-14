@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from mi_ai.auth import ensure_auth
 from mi_ai.console.cookie_tool import apply_browser_cookie
 from mi_ai.console.envfile import (
     WRITABLE_KEYS,
@@ -101,6 +102,30 @@ def create_app() -> FastAPI:
         if body.login:
             payload["login"] = await _run_login_mina()
         return payload
+
+    @app.post("/api/auth/refresh")
+    async def api_auth_refresh() -> dict[str, Any]:
+        """用现有账号/passToken 重新换票，再返回最新登录状态。"""
+        try:
+            auth = await ensure_auth()
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.exception("刷新登录状态失败")
+            return {
+                "ok": False,
+                "message": f"刷新登录状态失败：{exc}",
+                "need_human": True,
+                "notification_url": None,
+                "refreshed": False,
+                "status": collect_status(),
+            }
+        return {
+            "ok": auth.ok,
+            "message": auth.message,
+            "need_human": auth.need_human,
+            "notification_url": auth.notification_url,
+            "refreshed": auth.refreshed,
+            "status": collect_status(),
+        }
 
     @app.post("/api/service")
     async def api_service(body: ServiceBody) -> dict[str, Any]:
