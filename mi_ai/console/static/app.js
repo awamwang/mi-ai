@@ -100,6 +100,34 @@ function renderOverview(data) {
   $("#btn-open-login").dataset.url = auth.login_page_url || "https://account.xiaomi.com";
 
   const consoleInfo = data.console || {};
+  const portLabel = !consoleInfo.enabled
+    ? "未启用"
+    : consoleInfo.port_listening
+      ? `${consoleInfo.port} 监听中`
+      : `${consoleInfo.port || "—"} 未监听`;
+  $("#port-state").innerHTML = pill(
+    !consoleInfo.enabled ? null : !!consoleInfo.port_listening,
+    portLabel
+  );
+
+  $("#task-name").textContent = data.task_name || "awam-mi-ai";
+  const svcParts = [];
+  if (consoleInfo.enabled) {
+    svcParts.push(`已注册端口 ${consoleInfo.host}:${consoleInfo.port}`);
+  } else {
+    svcParts.push("控制台未启用（MI_AI_CONSOLE=0）");
+  }
+  svcParts.push(
+    consoleInfo.port_listening
+      ? "端口监听 ✓"
+      : consoleInfo.running
+        ? "进程在跑但端口未通"
+        : "控制台进程未运行"
+  );
+  if (consoleInfo.pid) svcParts.push(`wrapperPid=${consoleInfo.pid}`);
+  if (consoleInfo.url) svcParts.push(consoleInfo.url);
+  $("#service-detail").textContent = svcParts.join(" · ");
+
   const selfLink = $("#link-console-self");
   if (consoleInfo.url) {
     selfLink.href = consoleInfo.url;

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import socket
 from datetime import datetime
 from pathlib import Path
 
 from mi_ai.console.envfile import mask_secret, parse_env_map
 from mi_ai.paths import AUTH_REQUIRED_PATH, ROOT_DIR, get_seed_path, get_token_path
 from mi_ai.settings import SPEAKER_PROFILES, load_settings
+
+TASK_NAME = "awam-mi-ai"
 
 
 def _pid_running(pid: int) -> bool:
@@ -56,6 +59,15 @@ def re_split(raw: str) -> list[str]:
     import re
 
     return re.split(r"[,;\s]+", raw)
+
+
+def _port_listening(host: str, port: int) -> bool:
+    """探测本机控制台端口是否已在监听。"""
+    try:
+        with socket.create_connection((host, port), timeout=0.4):
+            return True
+    except OSError:
+        return False
 
 
 def collect_status() -> dict:
@@ -176,10 +188,12 @@ def collect_status() -> dict:
         console_port = 18865
     console_pid = _read_pid(log_dir / "console.pid")
     console_running = _pid_running(console_pid)
+    port_listening = _port_listening(console_host, console_port) if console_enabled else False
 
     return {
         "project_root": str(ROOT_DIR),
         "time": datetime.now().isoformat(timespec="seconds"),
+        "task_name": TASK_NAME,
         "watchdog": watchdog,
         "console": {
             "enabled": console_enabled,
@@ -188,6 +202,8 @@ def collect_status() -> dict:
             "host": console_host,
             "port": console_port,
             "url": f"http://{console_host}:{console_port}/",
+            "port_listening": port_listening,
+            "registered": console_enabled,
         },
         "devices": device_rows + extra,
         "auth": {
