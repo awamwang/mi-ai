@@ -82,8 +82,16 @@
 
       <h2 class="section-title">Cookie 工具</h2>
       <div class="tool">
-        <label for="cookie-input">粘贴 account.xiaomi.com 整段 Cookie</label>
-        <textarea id="cookie-input" rows="5" placeholder="userId=...; passToken=...; ..."></textarea>
+        <label for="cookie-input">粘贴 account.xiaomi.com 整段 Cookie（程序自动提取 userId / passToken）</label>
+        <textarea
+          id="cookie-input"
+          rows="5"
+          placeholder="直接粘贴整段即可，例如：deviceId=...; userId=...; passToken=...; serviceToken=...; ..."
+        ></textarea>
+        <p class="hint">
+          推荐：打开 https://account.xiaomi.com → F12 → Application → Cookies，复制整段或整表粘贴；
+          不必手工挑字段。勿只用控制台 <code>document.cookie</code>（passToken 常为 HttpOnly，会缺字段）。
+        </p>
         <label class="check">
           <input type="checkbox" id="cookie-login" checked />
           写入后立即执行 login_mina 换票

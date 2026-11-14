@@ -99,7 +99,18 @@ async function fetchJson(url, options) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const detail = data.detail || data.message || res.statusText;
-    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    let message;
+    if (typeof detail === "string") {
+      message = detail;
+    } else if (detail && typeof detail === "object" && detail.message) {
+      message = String(detail.message);
+    } else {
+      message = JSON.stringify(detail);
+    }
+    const err = new Error(message);
+    err.detail = detail;
+    err.status = res.status;
+    throw err;
   }
   return data;
 }
@@ -350,25 +361,37 @@ function setupActions() {
   $("#btn-cookie").addEventListener("click", async () => {
     const hint = $("#cookie-hint");
     hint.classList.remove("error");
-    hint.textContent = "处理中…";
+    const raw = ($("#cookie-input").value || "").trim();
+    if (!raw) {
+      hint.textContent =
+        "请先粘贴 account.xiaomi.com 的整段 Cookie。已停止：未写入 token、未执行换票。";
+      hint.classList.add("error");
+      return;
+    }
+    hint.textContent = "正在解析 Cookie…";
     try {
       const data = await fetchJson("/api/cookie", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          cookie: $("#cookie-input").value,
+          cookie: raw,
           login: $("#cookie-login").checked,
         }),
       });
-      let msg = data.message;
+      // 仅解析+写入成功才会走到这里；缺字段时接口直接 400，不会换票
+      let msg = data.message || "Cookie 已处理。";
       if (data.login) {
-        msg += data.login.ok ? "；换票成功。" : `；换票失败：\n${data.login.output || ""}`;
+        msg += data.login.ok
+          ? "；换票成功。"
+          : `；换票失败：\n${data.login.output || ""}`;
       }
       hint.textContent = msg;
       if (data.login && !data.login.ok) hint.classList.add("error");
       await refreshStatus();
     } catch (err) {
-      hint.textContent = err.message || String(err);
+      hint.textContent =
+        err.message ||
+        "Cookie 解析失败。已停止：未写入 token、未执行换票。";
       hint.classList.add("error");
     }
   });

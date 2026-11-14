@@ -40,7 +40,11 @@ async def _fetch_service_token(
     ssecurity: str,
     cookies: dict[str, str] | None = None,
 ) -> str:
-    """拉取 serviceToken；缺 cookie 时给出可诊断错误（不再裸 KeyError）。"""
+    """拉取 serviceToken；缺 cookie 时给出可诊断错误（不再裸 KeyError）。
+
+    location 一次性有效。向 mina STS 额外携带 passToken 易直接 401 并耗掉票据，
+    因此默认先按上游方式不带 Cookie 请求；仍读响应 Set-Cookie。
+    """
     import base64
     from urllib import parse as url_parse
 
@@ -49,17 +53,26 @@ async def _fetch_service_token(
     url = location + "&clientSign=" + url_parse.quote(client_sign)
     # 优先不跟随跳转：STS 常在首包 Set-Cookie 下发 serviceToken；
     # 自动跳转偶发落到 401 且丢 cookie。
+    # 不向 STS 发送 passToken：带上易被 api2.mina.mi.com/sts 直接 401。
+    _ = cookies  # 保留参数兼容调用方；换票请求本身不附带长期凭证
     last_meta: dict | None = None
     for allow_redirects in (False, True):
         async with session.get(
             url,
             allow_redirects=allow_redirects,
             ssl=False,
-            cookies=cookies or {},
         ) as r:
             token = _cookie_from_response(r)
             if token:
                 return token
+            # 跟随跳转后，也检查会话 cookie jar（跨域时 resp.cookies 可能为空）
+            if allow_redirects:
+                try:
+                    jar_token = session.cookie_jar.filter_cookies(r.url).get("serviceToken")
+                    if jar_token and jar_token.value:
+                        return jar_token.value
+                except Exception:
+                    pass
             body = (await r.text())[:400]
             last_meta = {
                 "desc": "未拿到 serviceToken cookie（可能需短信验证或 location 已失效）",
@@ -137,8 +150,27 @@ def apply_auth_patches() -> None:
             if "passToken" in resp:
                 self.token["passToken"] = resp["passToken"]
 
+            notify = (resp.get("notificationUrl") or "").strip()
+            location = (resp.get("location") or "").strip()
+            # 身份验证：即使 code=0 也可能只有 notificationUrl、没有换票字段
+            if resp.get("securityStatus") == 16 or (notify and not location):
+                if durable_before.get("passToken") and "passToken" not in self.token:
+                    self.token["passToken"] = durable_before["passToken"]
+                raise Exception(
+                    {
+                        "code": resp.get("code"),
+                        "desc": resp.get("desc")
+                        or resp.get("description")
+                        or "需要短信/身份验证后才能换票",
+                        "notificationUrl": notify or resp.get("notificationUrl"),
+                        "securityStatus": resp.get("securityStatus"),
+                    }
+                )
+
             # 已有 passToken 时，续期响应可能不再回传 passToken
             if "passToken" not in self.token or "userId" not in self.token:
+                if durable_before.get("passToken") and "passToken" not in self.token:
+                    self.token["passToken"] = durable_before["passToken"]
                 raise Exception(
                     {
                         "code": resp.get("code"),
@@ -148,9 +180,7 @@ def apply_auth_patches() -> None:
                     }
                 )
 
-            # securityStatus=16 等：需要短信/身份验证，location 常为空
-            location = (resp.get("location") or "").strip()
-            if not location or resp.get("securityStatus") == 16:
+            if not location:
                 raise Exception(resp)
 
             nonce = resp.get("nonce")

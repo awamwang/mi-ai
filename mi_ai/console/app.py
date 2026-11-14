@@ -87,18 +87,30 @@ def create_app() -> FastAPI:
 
     @app.post("/api/cookie")
     async def api_cookie(body: CookieBody) -> dict[str, Any]:
+        """解析整段 Cookie；缺字段时直接 400 返回，绝不写盘、绝不换票。"""
         result = apply_browser_cookie(body.cookie)
+        if not result.ok:
+            # 友好提示给前端；不触发 login_mina
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": result.message,
+                    "ok": False,
+                    "wrote_token": False,
+                    "login": None,
+                    "found_keys": list(result.found_keys),
+                },
+            )
         payload: dict[str, Any] = {
-            "ok": result.ok,
+            "ok": True,
             "message": result.message,
             "user_id": result.user_id,
             "pass_token_len": result.pass_token_len,
             "device_id": result.device_id,
             "wrote_token": result.wrote_token,
+            "found_keys": list(result.found_keys),
             "login": None,
         }
-        if not result.ok:
-            raise HTTPException(status_code=400, detail=result.message)
         if body.login:
             payload["login"] = await _run_login_mina()
         return payload

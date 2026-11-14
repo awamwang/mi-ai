@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import sys
 from pathlib import Path
@@ -25,71 +24,28 @@ async def _login_and_list(user: str, password: str) -> int:
     async with ClientSession() as session:
         account = MiAccount(session, user, password, store)
 
-        # 先看登录响应，便于定位 70016 / 验证码
+        # 直接走补丁后的 login：避免先 probe 再 login 重复换票、误耗一次性 STS location
         if not account.token:
-            account.token = {"deviceId": "A1B2C3D4E5F60718"}
-        probe = await account._serviceLogin("serviceLogin?sid=micoapi&_json=true")
-        if probe.get("code") != 0:
-            # 走账号密码二次认证
-            data = {
-                "_json": "true",
-                "qs": probe["qs"],
-                "sid": probe["sid"],
-                "_sign": probe["_sign"],
-                "callback": probe["callback"],
-                "user": user,
-                "hash": __import__("hashlib")
-                .md5(password.encode())
-                .hexdigest()
-                .upper(),
-            }
-            probe = await account._serviceLogin("serviceLoginAuth2", data)
-
-        if probe.get("code") != 0 or "userId" not in probe:
-            print("小米登录未完成。结果（已脱敏）：")
-            safe = {
-                k: probe.get(k)
-                for k in (
-                    "code",
-                    "desc",
-                    "description",
-                    "result",
-                    "securityStatus",
-                    "captchaUrl",
-                )
-                if k in probe
-            }
-            print(json.dumps(safe, ensure_ascii=False, indent=2))
-            notify = probe.get("notificationUrl")
-            if notify:
-                auth_file = Path(__file__).resolve().parent.parent / "_auth_url.txt"
-                auth_file.write_text(notify, encoding="utf-8")
-                print("\n需要身份验证。请在浏览器打开下面链接，完成短信/邮箱验证：")
-                print(notify)
-                print(f"\n（链接已写入 {auth_file}）")
-                print("验证完成后再运行：python -m mi_ai.login_mina")
-            else:
-                print(
-                    "\n无验证链接时，可改用 Cookie：\n"
-                    "1. Chrome 登录 https://account.xiaomi.com\n"
-                    "2. F12 → Application → Cookies，复制 userId 与 passToken\n"
-                    "3. 写入 .env：MI_COOKIE=userId=...; passToken=...\n"
-                )
-            return 1
-
-        # 用 probe 里已有的凭证做完整登录（含 passToken 种子）
-        # 保留 probe 写入的 userId/passToken，避免被空 token 冲掉
+            account.token = store.load_token() or {"deviceId": "A1B2C3D4E5F60718"}
         if "deviceId" not in account.token:
             account.token["deviceId"] = "A1B2C3D4E5F60718"
         # 清掉可能过期的业务 sid，强制按 passToken 重新换票
         for sid in ("micoapi", "xiaomiio"):
             account.token.pop(sid, None)
+        if account.token_store:
+            account.token_store.save_token(account.token)
 
         ok = await account.login("micoapi")
         if not ok or "micoapi" not in (account.token or {}):
             print("micoapi 登录失败（常见：需短信验证，或 serviceToken 未下发）。")
             print("可打开 https://account.xiaomi.com 完成验证后重试；")
-            print("或改用 Cookie：.env 写 MI_COOKIE=userId=...; passToken=...")
+            print(
+                "或用控制台 Cookie 工具粘贴 account.xiaomi.com 的整段 Cookie"
+                "（程序会自动提取 userId/passToken；勿只用 document.cookie）。"
+            )
+            auth_file = Path(__file__).resolve().parent.parent / "_auth_url.txt"
+            if auth_file.is_file():
+                print(f"若已生成验证链接，见：{auth_file}")
             return 1
 
         # L05C 等机型走 MiIO TTS，需要额外登录 xiaomiio
