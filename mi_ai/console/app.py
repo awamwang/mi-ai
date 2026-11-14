@@ -37,7 +37,8 @@ class ConfigUpdateBody(BaseModel):
 
 class CookieBody(BaseModel):
     cookie: str
-    login: bool = False
+    # 兼容旧前端；现已默认写入后自动换票并刷新登录状态
+    login: bool = True
 
 
 class ServiceBody(BaseModel):
@@ -87,21 +88,72 @@ def create_app() -> FastAPI:
 
     @app.post("/api/cookie")
     async def api_cookie(body: CookieBody) -> dict[str, Any]:
-        """解析整段 Cookie；缺字段时直接 400 返回，绝不写盘、绝不换票。"""
+        """解析整段 Cookie → 写入 → 自动强制换票探活 → 返回最新登录状态。
+
+        缺字段时直接 400，绝不写盘、绝不换票。
+        """
         result = apply_browser_cookie(body.cookie)
         if not result.ok:
-            # 友好提示给前端；不触发 login_mina
             raise HTTPException(
                 status_code=400,
                 detail={
                     "message": result.message,
                     "ok": False,
                     "wrote_token": False,
-                    "login": None,
+                    "auth": None,
+                    "status": None,
                     "found_keys": list(result.found_keys),
                 },
             )
-        payload: dict[str, Any] = {
+
+        auth_payload: dict[str, Any] | None = None
+        if body.login:
+            try:
+                auth = await ensure_auth(force_reticket=True)
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.exception("Cookie 写入后自动换票失败")
+                status = collect_status()
+                return {
+                    "ok": False,
+                    "message": f"{result.message}自动换票失败：{exc}",
+                    "user_id": result.user_id,
+                    "pass_token_len": result.pass_token_len,
+                    "device_id": result.device_id,
+                    "wrote_token": result.wrote_token,
+                    "found_keys": list(result.found_keys),
+                    "auth": {
+                        "ok": False,
+                        "message": str(exc),
+                        "need_human": True,
+                        "scope": _auth_scope_from_status(status),
+                    },
+                    "status": status,
+                }
+            status = collect_status()
+            scope = _auth_scope_from_status(status)
+            auth_payload = {
+                "ok": auth.ok,
+                "message": auth.message,
+                "need_human": auth.need_human,
+                "notification_url": auth.notification_url,
+                "refreshed": auth.refreshed,
+                "scope": scope,
+                "has_micoapi": bool(status.get("auth", {}).get("has_micoapi")),
+                "has_xiaomiio": bool(status.get("auth", {}).get("has_xiaomiio")),
+            }
+            return {
+                "ok": auth.ok or scope == "partial",
+                "message": result.message,
+                "user_id": result.user_id,
+                "pass_token_len": result.pass_token_len,
+                "device_id": result.device_id,
+                "wrote_token": result.wrote_token,
+                "found_keys": list(result.found_keys),
+                "auth": auth_payload,
+                "status": status,
+            }
+
+        return {
             "ok": True,
             "message": result.message,
             "user_id": result.user_id,
@@ -109,11 +161,9 @@ def create_app() -> FastAPI:
             "device_id": result.device_id,
             "wrote_token": result.wrote_token,
             "found_keys": list(result.found_keys),
-            "login": None,
+            "auth": auth_payload,
+            "status": collect_status(),
         }
-        if body.login:
-            payload["login"] = await _run_login_mina()
-        return payload
 
     @app.post("/api/auth/refresh")
     async def api_auth_refresh() -> dict[str, Any]:
@@ -122,21 +172,29 @@ def create_app() -> FastAPI:
             auth = await ensure_auth(force_reticket=True)
         except Exception as exc:  # noqa: BLE001
             _LOGGER.exception("刷新登录状态失败")
+            status = collect_status()
             return {
                 "ok": False,
                 "message": f"刷新登录状态失败：{exc}",
                 "need_human": True,
                 "notification_url": None,
                 "refreshed": False,
-                "status": collect_status(),
+                "scope": _auth_scope_from_status(status),
+                "has_micoapi": bool(status.get("auth", {}).get("has_micoapi")),
+                "has_xiaomiio": bool(status.get("auth", {}).get("has_xiaomiio")),
+                "status": status,
             }
+        status = collect_status()
         return {
             "ok": auth.ok,
             "message": auth.message,
             "need_human": auth.need_human,
             "notification_url": auth.notification_url,
             "refreshed": auth.refreshed,
-            "status": collect_status(),
+            "scope": _auth_scope_from_status(status),
+            "has_micoapi": bool(status.get("auth", {}).get("has_micoapi")),
+            "has_xiaomiio": bool(status.get("auth", {}).get("has_xiaomiio")),
+            "status": status,
         }
 
     @app.post("/api/service")
@@ -160,6 +218,17 @@ def create_app() -> FastAPI:
         }
 
     return app
+
+
+def _auth_scope_from_status(status: dict[str, Any]) -> str:
+    auth = status.get("auth") or {}
+    has_micoapi = bool(auth.get("has_micoapi"))
+    has_xiaomiio = bool(auth.get("has_xiaomiio"))
+    if has_micoapi and has_xiaomiio:
+        return "full"
+    if has_micoapi:
+        return "partial"
+    return "none"
 
 
 def _decode_subprocess_bytes(raw: bytes) -> str:
@@ -236,7 +305,32 @@ async def _run_login_mina() -> dict[str, Any]:
         return out.strip(), int(proc.returncode)
 
     output, code = await asyncio.to_thread(_run)
-    return {"ok": code == 0, "code": code, "output": output[-3000:]}
+    # 以落盘 token 为准，区分完整成功 / 仅 micoapi
+    has_micoapi = False
+    has_xiaomiio = False
+    try:
+        from mi_ai.token_store import SafeMiTokenStore
+
+        token = SafeMiTokenStore().load_token() or {}
+        has_micoapi = "micoapi" in token
+        has_xiaomiio = "xiaomiio" in token
+    except Exception:  # noqa: BLE001
+        pass
+    scope = "full" if (has_micoapi and has_xiaomiio) else (
+        "partial" if has_micoapi else "none"
+    )
+    if "LOGIN_SCOPE=full" in output:
+        scope = "full"
+    elif "LOGIN_SCOPE=partial" in output:
+        scope = "partial"
+    return {
+        "ok": code == 0,
+        "code": code,
+        "output": output[-3000:],
+        "scope": scope,
+        "has_micoapi": has_micoapi,
+        "has_xiaomiio": has_xiaomiio,
+    }
 
 
 # 模块导入即注册路由

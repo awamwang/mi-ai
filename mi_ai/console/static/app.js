@@ -271,20 +271,49 @@ async function refreshStatus() {
   renderOverview(data);
 }
 
+function formatAuthRefreshMessage(data) {
+  const auth = data.auth || data;
+  const scope = auth.scope || (data.status && data.status.auth
+    ? (data.status.auth.has_micoapi && data.status.auth.has_xiaomiio
+      ? "full"
+      : data.status.auth.has_micoapi
+        ? "partial"
+        : "none")
+    : "");
+  if (data.ok && scope === "full") {
+    return (auth.message || data.message || "登录状态已刷新") + "（micoapi + xiaomiio 就绪）";
+  }
+  if (scope === "partial" || (auth.has_micoapi && !auth.has_xiaomiio)) {
+    return (
+      (auth.message || data.message || "登录部分可用") +
+      "（micoapi 就绪，xiaomiio 仍缺失；LX06 一般可用）"
+    );
+  }
+  return auth.message || data.message || (data.ok ? "登录状态已刷新。" : "刷新登录状态失败。");
+}
+
 async function refreshLoginStatus() {
   const btn = $("#btn-refresh");
   const out = $("#service-output");
   out.hidden = false;
-  out.textContent = "正在强制刷新登录状态（清除业务票并重新换票）…";
+  out.textContent = "正在自动换票并刷新登录状态…";
   if (btn) btn.disabled = true;
   try {
     const data = await fetchJson("/api/auth/refresh", { method: "POST" });
-    out.textContent = data.message || (data.ok ? "登录状态已刷新。" : "刷新登录状态失败。");
+    out.textContent = formatAuthRefreshMessage(data);
+    if (!data.ok) out.classList.add("error");
+    else out.classList.remove("error");
     if (data.status) renderOverview(data.status);
     else await refreshStatus();
+    return data;
   } finally {
     if (btn) btn.disabled = false;
   }
+}
+
+function switchToOverview() {
+  const tab = document.querySelector('.tab[data-tab="overview"]');
+  if (tab) tab.click();
 }
 
 async function refreshConfig() {
@@ -352,14 +381,23 @@ function setupActions() {
   $("#btn-open-login").addEventListener("click", () => {
     const url = $("#btn-open-login").dataset.url || "https://account.xiaomi.com";
     window.open(url, "_blank", "noopener,noreferrer");
+    const out = $("#service-output");
+    out.hidden = false;
+    out.textContent =
+      "已打开小米登录页。浏览器登录或验证完成后：可到「配置」粘贴整段 Cookie 自动登录，或点「验证完成，自动刷新登录」。";
   });
   $("#btn-open-verify").addEventListener("click", () => {
     const url = $("#btn-open-verify").dataset.url;
     if (url) window.open(url, "_blank", "noopener,noreferrer");
+    const out = $("#service-output");
+    out.hidden = false;
+    out.textContent =
+      "已打开验证链接。完成后请点「验证完成，自动刷新登录」，或到「配置」粘贴最新整段 Cookie。";
   });
 
   $("#btn-cookie").addEventListener("click", async () => {
     const hint = $("#cookie-hint");
+    const btn = $("#btn-cookie");
     hint.classList.remove("error");
     const raw = ($("#cookie-input").value || "").trim();
     if (!raw) {
@@ -368,31 +406,51 @@ function setupActions() {
       hint.classList.add("error");
       return;
     }
-    hint.textContent = "正在解析 Cookie…";
+    if (btn) btn.disabled = true;
+    hint.textContent = "① 解析 Cookie → ② 自动换票探活 → ③ 刷新登录状态…";
     try {
       const data = await fetchJson("/api/cookie", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           cookie: raw,
-          login: $("#cookie-login").checked,
+          login: true,
         }),
       });
-      // 仅解析+写入成功才会走到这里；缺字段时接口直接 400，不会换票
-      let msg = data.message || "Cookie 已处理。";
-      if (data.login) {
-        msg += data.login.ok
-          ? "；换票成功。"
-          : `；换票失败：\n${data.login.output || ""}`;
+      const auth = data.auth || {};
+      let msg = data.message || "Cookie 已写入。";
+      if (auth.scope === "full" || (auth.has_micoapi && auth.has_xiaomiio)) {
+        msg += "已自动换票并刷新：登录正常（micoapi + xiaomiio）。";
+      } else if (auth.scope === "partial" || auth.has_micoapi) {
+        msg +=
+          "已自动换票并刷新：部分可用（micoapi 就绪，xiaomiio 仍缺失）。" +
+          (auth.message ? `\n${auth.message}` : "");
+        hint.classList.add("error");
+      } else {
+        msg +=
+          "Cookie 已写入，但自动换票未成功。" +
+          (auth.message ? `\n${auth.message}` : "");
+        hint.classList.add("error");
       }
       hint.textContent = msg;
-      if (data.login && !data.login.ok) hint.classList.add("error");
-      await refreshStatus();
+      if (data.status) renderOverview(data.status);
+      else await refreshStatus();
+      switchToOverview();
+      const out = $("#service-output");
+      out.hidden = false;
+      out.textContent = formatAuthRefreshMessage({
+        ok: !!(auth.ok || auth.has_micoapi),
+        auth,
+        status: data.status,
+        message: auth.message || msg,
+      });
     } catch (err) {
       hint.textContent =
         err.message ||
         "Cookie 解析失败。已停止：未写入 token、未执行换票。";
       hint.classList.add("error");
+    } finally {
+      if (btn) btn.disabled = false;
     }
   });
 

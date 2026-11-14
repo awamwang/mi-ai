@@ -53,15 +53,20 @@ async def _login_and_list(user: str, password: str) -> int:
         if not ok_io:
             print("警告：xiaomiio 登录失败，L05C 的 command TTS 可能不可用。")
             print("（micoapi 仍保留，LX06 一般可继续用）")
+            print("LOGIN_SCOPE=partial")
         else:
             print("micoapi + xiaomiio 均已登录。")
+            print("LOGIN_SCOPE=full")
 
         if "micoapi" not in account.token:
             print("内部错误：micoapi 票据在 xiaomiio 失败后丢失，请重试。")
             return 1
 
         clear_auth_required()
-        print(f"登录成功，token 已写入：{token_path}")
+        if ok_io:
+            print(f"登录成功（完整），token 已写入：{token_path}")
+        else:
+            print(f"登录部分成功（仅 micoapi），token 已写入：{token_path}")
         print("passToken 种子已保存，供失败后静默恢复。")
         mina = MiNAService(account)
         try:

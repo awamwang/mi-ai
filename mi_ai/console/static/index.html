@@ -59,11 +59,11 @@
         <div class="service-actions">
           <button type="button" class="btn btn-primary" id="btn-open-login">打开小米登录页</button>
           <button type="button" class="btn" id="btn-open-verify" hidden>打开验证链接</button>
+          <button type="button" class="btn" id="btn-refresh">验证完成，自动刷新登录</button>
         </div>
       </section>
 
       <div class="service-actions">
-        <button type="button" class="btn" id="btn-refresh">刷新登录状态</button>
         <button type="button" class="btn btn-primary" id="btn-start">启动服务</button>
         <button type="button" class="btn" id="btn-stop">停止服务</button>
       </div>
@@ -90,13 +90,10 @@
         ></textarea>
         <p class="hint">
           推荐：打开 https://account.xiaomi.com → F12 → Application → Cookies，复制整段或整表粘贴；
-          不必手工挑字段。勿只用控制台 <code>document.cookie</code>（passToken 常为 HttpOnly，会缺字段）。
+          不必手工挑字段。提交后会自动：解析 → 写入 → 换票探活 → 刷新登录状态。
+          勿只用控制台 <code>document.cookie</code>（passToken 常为 HttpOnly，会缺字段）。
         </p>
-        <label class="check">
-          <input type="checkbox" id="cookie-login" checked />
-          写入后立即执行 login_mina 换票
-        </label>
-        <button type="button" class="btn btn-primary" id="btn-cookie">提取并写入 token</button>
+        <button type="button" class="btn btn-primary" id="btn-cookie">提取并自动登录</button>
         <p class="hint" id="cookie-hint"></p>
       </div>
 
