@@ -105,9 +105,9 @@ def create_app() -> FastAPI:
 
     @app.post("/api/auth/refresh")
     async def api_auth_refresh() -> dict[str, Any]:
-        """用现有账号/passToken 重新换票，再返回最新登录状态。"""
+        """强制清除业务票后用 passToken/账号密码重新换票，再返回最新登录状态。"""
         try:
-            auth = await ensure_auth()
+            auth = await ensure_auth(force_reticket=True)
         except Exception as exc:  # noqa: BLE001
             _LOGGER.exception("刷新登录状态失败")
             return {

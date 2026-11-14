@@ -60,14 +60,23 @@ class SafeMiTokenStore:
             return
 
         # 原版会 delete 文件；这里改为保留 durable，去掉 micoapi/xiaomiio 等 sid
+        self.strip_business_sids(reason="登录/鉴权失败：保留 passToken，仅清除业务 serviceToken")
+
+    def strip_business_sids(self, *, reason: str | None = None) -> dict[str, Any]:
+        """仅保留长期凭证，强制后续用 passToken 重新换业务票。"""
+        ensure_data_dir()
+        self.token_path.parent.mkdir(parents=True, exist_ok=True)
         current = self._read_json(self.token_path) or self._read_json(self.backup_path) or {}
         durable = extract_durable(current) or self._token_from_seed() or {}
         if not durable:
-            _LOGGER.warning("请求清空 token，但无 passToken 可保留，跳过删文件")
-            return
-        _LOGGER.warning("登录/鉴权失败：保留 passToken，仅清除业务 serviceToken")
+            _LOGGER.warning("请求清除业务票，但无 passToken 可保留，跳过")
+            return {}
+        _LOGGER.warning(reason or "已清除业务 serviceToken，保留 passToken")
         self._write_json(self.token_path, durable)
         self._write_json(self.backup_path, durable)
+        if durable.get("passToken"):
+            self._write_seed(durable)
+        return durable
 
     def _token_from_seed(self) -> dict[str, Any] | None:
         seed = self._read_json(get_seed_path())

@@ -264,7 +264,7 @@ async function refreshLoginStatus() {
   const btn = $("#btn-refresh");
   const out = $("#service-output");
   out.hidden = false;
-  out.textContent = "正在刷新登录状态（换票）…";
+  out.textContent = "正在强制刷新登录状态（清除业务票并重新换票）…";
   if (btn) btn.disabled = true;
   try {
     const data = await fetchJson("/api/auth/refresh", { method: "POST" });

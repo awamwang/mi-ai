@@ -172,40 +172,129 @@ async def _probe_login(user: str, password: str, token_path: Path) -> AuthStatus
         )
 
 
-async def ensure_auth() -> AuthStatus:
-    """启动前或定期调用：静默续期；失败则写告警。"""
+def _human_recovery_hint(message: str, notification_url: str | None = None) -> str:
+    """失败时补充控制台恢复路径（打开登录页 / Cookie 工具）。"""
+    hints = [
+        message.rstrip("。").rstrip(),
+        "可在控制台「打开小米登录页」完成验证后，用 Cookie 工具粘贴 account.xiaomi.com 的 Cookie，再点「刷新登录状态」",
+    ]
+    if notification_url:
+        hints.append(f"或直接打开验证链接：{notification_url}")
+    return "。".join(hints) + "。"
+
+
+def _mark_auth_failed(status: AuthStatus) -> AuthStatus:
+    """写入失效标记并通知；仅在自动恢复也失败后调用。"""
+    failed = AuthStatus(
+        ok=False,
+        message=_human_recovery_hint(status.message, status.notification_url),
+        need_human=True,
+        notification_url=status.notification_url,
+        refreshed=status.refreshed,
+    )
+    path = write_auth_required(failed.message, failed.notification_url)
+    notify_windows(
+        "mi-ai 需要重新验证小米账号",
+        failed.message[:120] + (f"；详见 {path.name}" if path else ""),
+    )
+    if failed.notification_url:
+        (ROOT_DIR / "_auth_url.txt").write_text(
+            failed.notification_url, encoding="utf-8"
+        )
+    return failed
+
+
+async def _attempt_password_auth(
+    user: str,
+    password: str,
+    token_path: Path,
+    *,
+    force_reticket: bool,
+    strip_reason: str,
+) -> AuthStatus:
+    store = SafeMiTokenStore(token_path)
+    if force_reticket:
+        store.strip_business_sids(reason=strip_reason)
+    return await _probe_login(user, password, token_path)
+
+
+async def ensure_auth(*, force_reticket: bool = False) -> AuthStatus:
+    """启动前或定期调用：探活；失败则强制换票自愈；仍失败才写告警。
+
+    force_reticket=True：跳过软探活，直接清业务票换票（控制台「刷新登录状态」）。
+    默认路径：软探活 → 失败则清 micoapi/xiaomiio 再换票 → 仍失败才标记登录失效。
+    """
     token_path = prepare_auth_env()
     settings = load_settings()
     require_xiaomi_login(settings)
+    store = SafeMiTokenStore(token_path)
+    has_password = bool(settings.mi_user and settings.mi_pass)
 
-    if not (settings.mi_user and settings.mi_pass):
-        # 仅 Cookie 模式：不做密码续期，只检查 token 文件
-        store = SafeMiTokenStore(token_path)
+    if not has_password:
+        # 仅 Cookie 模式：无法用账号密码自愈
         token = store.load_token()
-        if token and token.get("micoapi"):
+        if not force_reticket and token and token.get("micoapi"):
             clear_auth_required()
             return AuthStatus(ok=True, message="已有 micoapi token（Cookie 模式）")
-        return AuthStatus(
-            ok=False,
-            message="Cookie 模式且缺少有效 token，请重新配置 MI_COOKIE 或账号密码",
-            need_human=True,
+        return _mark_auth_failed(
+            AuthStatus(
+                ok=False,
+                message=(
+                    "Cookie 模式无法静默换票，请配置 MI_USER/MI_PASS，"
+                    "或粘贴浏览器 Cookie 后勾选立即换票"
+                ),
+                need_human=True,
+            )
         )
 
-    status = await _probe_login(settings.mi_user, settings.mi_pass, token_path)
+    user = settings.mi_user
+    password = settings.mi_pass
+
+    if force_reticket:
+        status = await _attempt_password_auth(
+            user,
+            password,
+            token_path,
+            force_reticket=True,
+            strip_reason="控制台强制刷新：已清除业务 serviceToken，准备用 passToken 换票",
+        )
+        if status.ok:
+            clear_auth_required()
+            return status
+        return _mark_auth_failed(status)
+
+    # 1) 软探活（沿用现有业务票 / passToken 续期）
+    status = await _attempt_password_auth(
+        user,
+        password,
+        token_path,
+        force_reticket=False,
+        strip_reason="",
+    )
     if status.ok:
         clear_auth_required()
         return status
 
-    path = write_auth_required(status.message, status.notification_url)
-    notify_windows(
-        "mi-ai 需要重新验证小米账号",
-        status.message[:120]
-        + (f"；详见 {path.name}" if path else ""),
+    # 2) 失败后自动强制换票自愈（尚未标记失效）
+    _LOGGER.warning(
+        "鉴权探活失败，尝试清除业务票后自动恢复：%s",
+        status.message[:200],
     )
-    if status.notification_url:
-        auth_file = ROOT_DIR / "_auth_url.txt"
-        auth_file.write_text(status.notification_url, encoding="utf-8")
-    return status
+    recovered = await _attempt_password_auth(
+        user,
+        password,
+        token_path,
+        force_reticket=True,
+        strip_reason="自动恢复：已清除业务 serviceToken，准备用 passToken 换票",
+    )
+    if recovered.ok:
+        clear_auth_required()
+        recovered.message = f"鉴权已自动恢复（强制换票成功）。{recovered.message}"
+        _LOGGER.info("%s", recovered.message)
+        return recovered
+
+    # 3) 仍失败：标记登录失效
+    return _mark_auth_failed(recovered)
 
 
 def main(argv: list[str] | None = None) -> None:
